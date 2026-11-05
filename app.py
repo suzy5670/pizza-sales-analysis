@@ -3,10 +3,13 @@
 # Tableau de bord interactif branché sur MySQL (pizza_db)
 # =====================================================
 
+from datetime import datetime
+from pathlib import Path
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from sqlalchemy import bindparam, create_engine, text
+from sqlalchemy import bindparam, create_engine, event, text
 
 # ----- Configuration de la page -----
 st.set_page_config(page_title="Plato's Pizza", page_icon="🍕", layout="wide")
@@ -73,7 +76,27 @@ JOURS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"
 # =====================================================
 @st.cache_resource
 def get_engine():
-    return create_engine("mysql+pymysql://pizza_user:pizza2026@localhost:3306/pizza_db")
+    """En local : base MySQL. En ligne (Streamlit Cloud) : copie SQLite pizza.db."""
+    try:
+        engine = create_engine("mysql+pymysql://pizza_user:pizza2026@localhost:3306/pizza_db")
+        with engine.connect():
+            pass
+        return engine
+    except Exception:
+        # MySQL introuvable -> on lit la copie SQLite livrée avec l'appli
+        engine = create_engine(f"sqlite:///{Path(__file__).parent / 'pizza.db'}")
+
+        @event.listens_for(engine, "connect")
+        def fonctions_mysql(conn, _):
+            # SQLite ne connaît pas ces fonctions MySQL : on les recrée
+            conn.create_function("MONTH", 1, lambda d: int(d[5:7]))
+            conn.create_function("HOUR", 1, lambda t: int(t[:2]))
+            conn.create_function("WEEKDAY", 1, lambda d: datetime.strptime(d, "%Y-%m-%d").weekday())
+            conn.create_function("FIELD", -1, lambda v, *l: l.index(v) + 1 if v in l else 0)
+        return engine
+
+
+MOTEUR = "MySQL" if get_engine().dialect.name == "mysql" else "SQLite (copie de la base MySQL)"
 
 
 @st.cache_data
@@ -256,15 +279,15 @@ quelles pizzas rapportent, comment augmenter le panier moyen.
 # =====================================================
 elif page == "📊 KPI":
     st.title("📊 Indicateurs clés")
-    st.caption(f"Période : {PERIODE} · données lues en direct dans MySQL")
+    st.caption(f"Période : {PERIODE} · données lues en direct dans {MOTEUR}")
 
     kpi = run_query(f"""
         SELECT ROUND(SUM(montant), 2)                             AS ca,
                COUNT(DISTINCT order_id)                           AS commandes,
                SUM(quantity)                                      AS pizzas,
                ROUND(SUM(montant) / COUNT(DISTINCT order_id), 2)  AS panier,
-               ROUND(SUM(quantity) / COUNT(DISTINCT order_id), 2) AS pizzas_cmd,
-               ROUND(COUNT(DISTINCT order_id) / COUNT(DISTINCT order_date), 1) AS cmd_jour
+               ROUND(SUM(quantity) * 1.0 / COUNT(DISTINCT order_id), 2) AS pizzas_cmd,
+               ROUND(COUNT(DISTINCT order_id) * 1.0 / COUNT(DISTINCT order_date), 1) AS cmd_jour
         FROM v_ventes {FILTRE}
     """, P).iloc[0]
 
@@ -284,7 +307,7 @@ elif page == "📊 KPI":
                ROUND(SUM(montant), 2)                             AS ca,
                COUNT(DISTINCT order_id)                           AS commandes,
                ROUND(SUM(montant) / COUNT(DISTINCT order_id), 2)  AS panier,
-               ROUND(SUM(quantity) / COUNT(DISTINCT order_id), 2) AS pizzas_cmd
+               ROUND(SUM(quantity) * 1.0 / COUNT(DISTINCT order_id), 2) AS pizzas_cmd
         FROM v_ventes {FILTRE}
         GROUP BY num_mois ORDER BY num_mois
     """, P)
@@ -335,7 +358,7 @@ elif page == "📈 Ventes dans le temps":
     with col_g:   # Q2 : jours de la semaine
         df_jour = run_query(f"""
             SELECT WEEKDAY(order_date) AS num_jour,
-                   ROUND(COUNT(DISTINCT order_id) / COUNT(DISTINCT order_date), 1) AS moy_commandes
+                   ROUND(COUNT(DISTINCT order_id) * 1.0 / COUNT(DISTINCT order_date), 1) AS moy_commandes
             FROM v_ventes {FILTRE}
             GROUP BY num_jour ORDER BY num_jour
         """, P)
