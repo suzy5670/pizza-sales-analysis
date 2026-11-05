@@ -1,8 +1,13 @@
 # 🍕 Plato's Pizza – Analyse des ventes 2015 (SQL + Python + Streamlit)
 
+🔗 **Application en ligne : https://pizza-sales-suz.streamlit.app**
+
+> En local, l'application lit la base MySQL. En ligne, elle lit `pizza.db`, une copie SQLite de la même base, car Streamlit Cloud ne peut pas accéder à un MySQL local.
+
 ## Objectif
 Analyser une année de ventes d'une pizzeria pour aider le gérant à décider :
 horaires et personnel, carte, tailles et offres.
+
 
 ## Données
 4 fichiers CSV (Maven Analytics) :
